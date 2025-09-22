@@ -80,9 +80,8 @@ DEVICE_CONFIG: Dict[str, Dict[str, Any]] = {
              "options": ["Metro Tier 3", "Metro Tier 2 / 1", "BRAS", "Tera"]},
             {"key": "Kapasitas", "prompt": "Pilih Kapasitas", "type": "buttons",
              "options": ["1G", "10G", "100G"]},
-            {"key": "Posisi", "prompt": "Ketik Posisi Barang (e.g., Rak A-01)", "type": "text", "required": True},
-            {"key": "Jumlah", "prompt": "Masukkan Jumlah unit (angka saja)", "type": "text", "required": True},
-            # {"key": "Keterangan", "prompt": "Masukkan Keterangan (lokasi/kondisi barang)", "type": "text"}, # <-- DIMODIFIKASI: Dihapus
+            {"key": "Posisi", "prompt": "Ketik Posisi Barang (e.g. STO Malang Kota)", "type": "text", "required": True},
+            {"key": "Jumlah", "prompt": "Masukkan Jumlah unit (e.g. 1,2,3,...)", "type": "text", "required": True},
             {"key": "Link Foto", "prompt": "Kirim foto perangkat", "type": "photo"},
         ]
     },
