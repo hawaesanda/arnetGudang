@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Google OAuth files
+token.pickle
+
+# Bot session files
+*.session
+
+# Logs
+*.log
+
+# Virtual environment
+venv/
+env/
+ENV/

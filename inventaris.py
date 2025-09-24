@@ -7,18 +7,22 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaInMemoryUpload
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # =========================
 # KONFIGURASI
 # =========================
-API_ID = 21604277 
-API_HASH = "5320799e4addb26b8117972b3c959440"
-BOT_TOKEN = "8340869371:AAFbTsuAxc3QRBR0-cRyLCDsa9p23vW7mTg"
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-SPREADSHEET_ID = "1nD_g4_5AZ8yG5-7Z-LOfQ9rOhzXfDJgLzGS7wvXg1n8"
-GOOGLE_DRIVE_PARENT_FOLDER_ID = "1aTEuqTK4FsezLHc_W83N08HI-7VtlvEb"
-CREDENTIALS_FILE = "credentials.json"
-TOKEN_FILE = "token.pickle"
+SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+GOOGLE_DRIVE_PARENT_FOLDER_ID = os.getenv("GOOGLE_DRIVE_PARENT_FOLDER_ID")
+CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.json")
+TOKEN_FILE = os.getenv("TOKEN_FILE", "token.pickle")
 
 # =========================
 # "BUKU RESEP" PERANGKAT
