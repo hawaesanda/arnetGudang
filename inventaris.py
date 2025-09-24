@@ -1,4 +1,4 @@
-import os, re, imghdr, pickle, logging, gspread
+import os, re, mimetypes, pickle, logging, gspread
 from datetime import datetime
 from collections import defaultdict
 from typing import Optional, Dict, Any, List, Tuple
@@ -241,7 +241,17 @@ def upload_photo_to_drive(file_data: bytes, file_name: str, jenis_perangkat: str
     try:
         folder_ids = DEVICE_CONFIG.get(jenis_perangkat, {}).get("drive_folder_ids", {})
         target_folder_id = folder_ids.get(detail_perangkat, GOOGLE_DRIVE_PARENT_FOLDER_ID)
-        kind = imghdr.what(None, h=file_data) or "jpeg"
+        # Detect image type using mimetypes instead of deprecated imghdr
+        kind = "jpeg"  # default
+        if file_data.startswith(b'\x89PNG'):
+            kind = "png"
+        elif file_data.startswith(b'\xff\xd8'):
+            kind = "jpeg"
+        elif file_data.startswith(b'GIF'):
+            kind = "gif"
+        elif file_data.startswith(b'WEBP', 8):
+            kind = "webp"
+        
         media = MediaInMemoryUpload(file_data, mimetype=f"image/{kind}", resumable=False)
         file = drive_service.files().create(
             body={"name": file_name, "parents": [target_folder_id]},
@@ -1576,8 +1586,13 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
                 return await show_main_menu(q.message)
         
         elif device_type == "jaringan":
-            detail_str = parts[1]
-            jns, kap, pos = detail_str.split("::") 
+            # Parse callback data: editqty_jaringan_detail::jns::kap::pos
+            if len(parts) < 4:
+                await q.message.reply_text("Format data tidak valid.", reply_markup=ReplyKeyboardRemove())
+                await clear_user_session(user_id)
+                return await show_main_menu(q.message)
+            
+            jns, kap, pos = parts[1], parts[2], parts[3]
             
             ws, row_num, row_data = find_jaringan_row(jns, kap, pos)
             if not row_num:
@@ -1676,8 +1691,13 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
             await q.message.reply_text(f"Masukkan jumlah yang akan diambil (stok tersedia: {row_data.get('Jumlah','0')}):", reply_markup=NAVIGATION_KEYBOARD)
 
         elif device_type == "jaringan":
-            detail_str = parts[1]
-            jns, kap, pos = detail_str.split("::") 
+            # Parse callback data: consume_jaringan_detail::jns::kap::pos
+            if len(parts) < 4:
+                await q.message.reply_text("Format data tidak valid.", reply_markup=ReplyKeyboardRemove())
+                await clear_user_session(user_id)
+                return await show_main_menu(q.message)
+            
+            jns, kap, pos = parts[1], parts[2], parts[3]
             
             ws, row_num, row_data = find_jaringan_row(jns, kap, pos)
             if not row_num:
