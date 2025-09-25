@@ -11,6 +11,12 @@ token.pickle
 
 # Bot session files
 *.session
+*.session-journal
+bot-gudang.session
+bot-gudang.session-journal
+
+# Python requirements (if contains sensitive info)
+requirements.txt
 
 # Logs
 *.log
