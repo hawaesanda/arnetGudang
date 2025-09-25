@@ -526,20 +526,19 @@ async def process_input_confirmation(message: Message):
     lines = [f"Konfirmasi Data Masuk - {device_type}", ""]
     
     if device_type == "Subcard":
-        for q in DEVICE_CONFIG[device_type]["questions"]:
-            key = q["key"]
+        # Tampilkan data sesuai urutan pertanyaan
+        for key in [q['key'] for q in DEVICE_CONFIG[device_type]['questions']]:
             value = data.get(key, "(kosong)")
-            
-            if key == "Jumlah":
+            if key == "Jumlah Port":
                 jumlah_port = data.get("Jumlah Port", "?")
                 kapasitas = data.get("Kapasitas", "?")
                 lines.append(f"- Jumlah Port: {jumlah_port} x {kapasitas}")
-                lines.append(f"- Jumlah Unit: {value}")
-            elif key != "Jumlah Port":
-                if q["type"] == "photo":
-                    value = "(foto akan diunggah)"
+            elif key == "Link Foto":
+                lines.append(f"- {key}: (foto akan diunggah)")
+            else:
                 lines.append(f"- {key}: {value}")
     else:
+        # Format default untuk perangkat lain
         for q in DEVICE_CONFIG[device_type]["questions"]:
             key, value = q["key"], data.get(q["key"], "(kosong)")
             if q["type"] == "photo":
@@ -673,28 +672,6 @@ async def handle_messages(client: Client, message: Message):
                 user_states[user_id].append("awaiting_add_or_cancel_duplicate")
                 await message.reply_text(
                     "Barang ini sudah ada. Apakah Anda ingin menambah jumlah stok?",
-                    reply_markup=DUPLICATE_CONFIRM_KEYBOARD
-                )
-                return
-            
-        elif dev == "Subcard" and q["key"] == "Posisi":
-            jns = user_data[user_id].get("Jenis Perangkat")
-            kap = user_data[user_id].get("Kapasitas")
-            pos = ans # 'ans' adalah 'Posisi' yang baru dimasukkan
-
-            ws, row_num, row_data = find_subcard_row(jns, kap, pos)
-
-            if row_num:
-                user_data[user_id].update({
-                    'duplicate_ws': ws,
-                    'duplicate_row_num': row_num,
-                    'duplicate_row_data': row_data,
-                })
-                user_data[user_id].pop("question_index", None) 
-
-                user_states[user_id].append("awaiting_add_or_cancel_duplicate")
-                await message.reply_text(
-                    "Barang dengan Jenis, Kapasitas, dan Posisi ini sudah ada. Apakah Anda ingin menambah jumlah stok?",
                     reply_markup=DUPLICATE_CONFIRM_KEYBOARD
                 )
                 return
@@ -1486,25 +1463,50 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
             records = ws.get_all_records()
             headers = ws.row_values(1)
 
-            if "Jumlah" in headers: 
+            if device_type == "Subcard":
+                # Mengelompokkan list rekap berdasarkan Jenis Perangkat
+                grouped_by_jenis = defaultdict(list)
+                for r in records:
+                    jenis = r.get("Jenis Perangkat")
+                    if not jenis: continue
+
+                    kapasitas = r.get("Kapasitas", "N/A")
+                    posisi = r.get("Posisi", "N/A")
+                    port_count = str(r.get("Jumlah Port", "0")).strip() or "0"
+                    
+                    # Membuat string format: "12 x 10G (di STO Malang)"
+                    rekap_string = f"{port_count} x {kapasitas} (di {posisi})"
+                    grouped_by_jenis[jenis].append(rekap_string)
+                
+                # Membuat teks respons
+                lines = [f"📊 Rekapitulasi Stok - {device_type}"]
+                if not grouped_by_jenis:
+                    lines.append("\nTidak ada data untuk ditampilkan.")
+                else:
+                    lines.append("")
+                    for jenis, rekap_list in sorted(grouped_by_jenis.items()):
+                        lines.append(f"{jenis}")
+                        for item_rekap in sorted(rekap_list):
+                            lines.append(f"  - {item_rekap}")
+                        lines.append("")
+
+                resp = "\n".join(lines)
+
+            elif "Jumlah" in headers: # Untuk Patch Cord
                 totals: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
                 
                 group_by_keys = config["display_group_by"]
-                if device_type == "Patch Cord":
-                    detail_key = "Detail Perangkat"
-                else: 
-                    detail_key = "Jenis Perangkat"
+                detail_key = "Detail Perangkat"
 
                 for r in records:
                     detail = r.get(detail_key)
                     if not detail: continue
                     
                     key_parts = [str(r.get(k, "N/A")) for k in group_by_keys]
-                    if device_type == "Patch Cord":
-                        k1 = r.get("Konektor 1", "N/A")
-                        k2 = r.get("Konektor 2", "N/A")
-                        key_parts[1] = f"{k1} -> {k2}"
-                        key_parts.pop(2) 
+                    k1 = r.get("Konektor 1", "N/A")
+                    k2 = r.get("Konektor 2", "N/A")
+                    key_parts[1] = f"{k1} → {k2}"
+                    key_parts.pop(2) 
                     
                     key = " / ".join(key_parts)
                     
@@ -1512,11 +1514,11 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
                     except ValueError: qty = 0
                     totals[detail][key] += qty
                 
-                lines = [f"Rekapitulasi Stok untuk {device_type}", ""]
+                lines = [f"📊 Rekapitulasi Stok - {device_type}", ""]
                 for d, combos in sorted(totals.items()):
-                    lines.append(d) 
+                    lines.append(f"{d}") 
                     for c, t in sorted(combos.items()):
-                        lines.append(f"  - {c}: {t} units")
+                        lines.append(f"  - {c}: {t} unit")
                     lines.append("")
                 resp = "\n".join(lines) if totals else f"Tidak ada data untuk {device_type}."
 
@@ -1532,15 +1534,15 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
                     resp = "Tidak ada data untuk SFP."
                 else:
                     MAX_SN = 20
-                    lines = ["Rekapitulasi Stok untuk SFP", ""]
+                    lines = [f"📊 Rekapitulasi Stok - {device_type}", ""]
                     for d, combos in sorted(grouped.items()):
-                        lines.append(d)
+                        lines.append(f"{d}")
                         for c, lst in sorted(combos.items()):
                             lines.append(f"  • {c}: {len(lst)} unit")
                             show = lst[:MAX_SN]
                             lines.extend([f"    - {s}" for s in show])
                             if len(lst) > MAX_SN:
-                                lines.append(f"    (+{len(lst)-MAX_SN} lainnya)")
+                                lines.append(f"    ( +{len(lst)-MAX_SN} lainnya )")
                         lines.append("")
                     resp = "\n".join(lines)
             else:
