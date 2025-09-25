@@ -933,7 +933,7 @@ async def handle_messages(client: Client, message: Message):
             user_states[user_id].append("awaiting_device_to_edit")
             # --- DIMODIFIKASI ---
             # Subcard tidak punya Keterangan, jadi jangan ditampilkan
-            device_options = [dev for dev in DEVICE_CONFIG.keys() if dev != "Subcard"]
+            device_options = list(DEVICE_CONFIG.keys())
             return await message.reply_text("Pilih jenis perangkat yang akan diubah keterangannya:", reply_markup=get_dynamic_keyboard(device_options))
         
         if text == OPT_EDIT_QTY:
@@ -991,30 +991,27 @@ async def handle_messages(client: Client, message: Message):
                     await message.reply_text("Tidak ada data Subcard untuk diubah.", reply_markup=ReplyKeyboardRemove())
                     return await show_main_menu(message)
                 buttons = []
-                grouped = defaultdict(int)
-                for rec in records:
+                for i, rec in enumerate(records):
                     key_tuple = (
                         rec.get("Jenis Perangkat", ""), 
                         rec.get("Kapasitas", ""), 
                         rec.get("Posisi", ""), 
                     )
                     key = tuple(str(k) for k in key_tuple)
-                    try: qty = int(str(rec.get("Jumlah", "0")).strip() or "0")
-                    except ValueError: qty = 0
-                    grouped[key] += qty
-                for key, total_qty in sorted(grouped.items()):
-                    if total_qty >= 0: 
-                        callback_data = f"editqty_jaringan_detail::{'::'.join(key)}" 
-                        row_data_mock = {"Jenis Perangkat": key[0], "Kapasitas": key[1], "Posisi": key[2]}
-                        buttons.append([InlineKeyboardButton(f"{join_detail_subcard_no_ket(row_data_mock)} (Stok: {total_qty})", callback_data=callback_data)])
-                await message.reply_text("Pilih kombinasi Subcard yang ingin diubah jumlahnya:", reply_markup=NAVIGATION_KEYBOARD)
+                    port_qty = str(rec.get("Jumlah Port", "0")).strip() or "0"
+                    
+                    callback_data = f"editqty_jaringan_detail::{'::'.join(key)}" 
+                    row_data_mock = {"Jenis Perangkat": key[0], "Kapasitas": key[1], "Posisi": key[2]}
+                    buttons.append([InlineKeyboardButton(f"{join_detail_subcard_no_ket(row_data_mock)} ({port_qty} Port)", callback_data=callback_data)])
+
+                await message.reply_text("Pilih item Subcard yang ingin diubah Jumlah Port-nya:", reply_markup=NAVIGATION_KEYBOARD)
                 await message.reply_text("Daftar item:", reply_markup=InlineKeyboardMarkup(buttons))
             except Exception:
-                logger.exception("Gagal memuat item Jaringan untuk ubah jumlah.")
+                logger.exception("Gagal memuat item Subcard untuk ubah jumlah.")
                 await message.reply_text("Gagal memuat data. Mohon coba lagi.", reply_markup=ReplyKeyboardRemove())
                 return await show_main_menu(message)
         else:
-             qty_devices = [dev for dev, cfg in DEVICE_CONFIG.items() if "Jumlah" in [q['key'] for q in cfg['questions']]]
+             qty_devices = [dev for dev, cfg in DEVICE_CONFIG.items() if "Jumlah" in [q['key'] for q in cfg['questions']] or "Jumlah Port" in [q['key'] for q in cfg['questions']]]
              await message.reply_text("Pilihan tidak valid.", reply_markup=get_dynamic_keyboard(qty_devices))
         return
 
@@ -1055,10 +1052,22 @@ async def handle_messages(client: Client, message: Message):
                         buttons.append([InlineKeyboardButton(f"{join_detail_pc_no_ket(*key)} (Stok: {total_qty})", callback_data=callback_data)])
                 
                 elif text == "Subcard":
-                    # Blok ini seharusnya tidak akan pernah terjangkau karena sudah difilter
-                    # Tapi kita biarkan sebagai failsafe
-                    await message.reply_text("Subcard tidak memiliki kolom Keterangan.", reply_markup=ReplyKeyboardRemove())
-                    return await show_main_menu(message)
+                    grouped = defaultdict(list)
+                    for i, rec in enumerate(records):
+                        key_tuple = (
+                            rec.get("Jenis Perangkat", ""), 
+                            rec.get("Kapasitas", ""), 
+                            rec.get("Posisi", ""), 
+                        )
+                        key = tuple(str(k) for k in key_tuple)
+                        grouped[key].append(i+2)
+                    
+                    for key, row_nums in sorted(grouped.items()):
+                        # Kita hanya ambil row pertama karena Posisi seharusnya unik per kombinasi
+                        row_num = row_nums[0]
+                        callback_data = f"editket_jaringan_row::{row_num}"
+                        row_data_mock = {"Jenis Perangkat": key[0], "Kapasitas": key[1], "Posisi": key[2]}
+                        buttons.append([InlineKeyboardButton(f"{join_detail_subcard_no_ket(row_data_mock)}", callback_data=callback_data)])
 
                 await message.reply_text(f"Pilih item yang ingin diubah keterangannya:", reply_markup=NAVIGATION_KEYBOARD)
                 await message.reply_text("Daftar item:", reply_markup=InlineKeyboardMarkup(buttons))
@@ -1085,7 +1094,7 @@ async def handle_messages(client: Client, message: Message):
             new_ket = user_data[user_id]['new_ket']
             await message.reply_text("Mengubah keterangan...", reply_markup=ReplyKeyboardRemove())
             try:
-                ket_col = ws.row_values(1).index("Keterangan") + 1
+                ket_col = ws.row_values(1).index("Posisi") + 1
                 ws.update_cell(row_num, ket_col, new_ket)
                 headers = ws.row_values(1); row_vals = ws.row_values(row_num)
                 row_map = dict(zip(headers, row_vals))
@@ -1119,9 +1128,13 @@ async def handle_messages(client: Client, message: Message):
             ws = user_data[user_id]['worksheet_to_edit']; row_num = user_data[user_id]['row_to_edit']
             new_qty = user_data[user_id]['new_qty']
             old_qty = user_data[user_id].get('old_qty','N/A')
-            await message.reply_text("Mengubah jumlah...", reply_markup=ReplyKeyboardRemove())
+            
+            # Logika Cerdas untuk memilih kolom yang benar
+            column_to_update = user_data[user_id].get('qty_column_name', 'Jumlah')
+
+            await message.reply_text(f"Mengubah {column_to_update}...", reply_markup=ReplyKeyboardRemove())
             try:
-                qty_col = ws.row_values(1).index("Jumlah") + 1
+                qty_col = ws.row_values(1).index(column_to_update) + 1
                 ws.update_cell(row_num, qty_col, new_qty)
                 headers = ws.row_values(1); row_vals = ws.row_values(row_num)
                 row_map = dict(zip(headers, row_vals))
@@ -1134,10 +1147,10 @@ async def handle_messages(client: Client, message: Message):
                 else:
                     detail_no_ket = join_detail_sfp_no_ket(row_map)
                 
-                append_log("UPDATE", ws.title, detail_no_ket, user_id, username, ket=f"Jumlah diubah dari {old_qty} ke {new_qty}")
-                await message.reply_text("Jumlah berhasil diubah.")
+                append_log("UPDATE", ws.title, detail_no_ket, user_id, username, ket=f"{column_to_update} diubah dari {old_qty} ke {new_qty}")
+                await message.reply_text(f"{column_to_update} berhasil diubah.")
             except Exception:
-                logger.exception("Gagal ubah jumlah"); await message.reply_text("Gagal mengubah jumlah.")
+                logger.exception(f"Gagal ubah {column_to_update}"); await message.reply_text(f"Gagal mengubah {column_to_update}.")
             return await show_main_menu(message)
         await message.reply_text("Dibatalkan.", reply_markup=ReplyKeyboardRemove()); return await show_main_menu(message)
 
@@ -1563,34 +1576,49 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
             headers = ws.row_values(1)
             row_data = dict(zip(headers, ws.row_values(row_num)))
             
-            summary = build_summary_text(ws.title, row_data)
-            user_data[user_id].update({'worksheet_to_edit': ws, 'row_to_edit': row_num, 'old_ket': row_data.get('Keterangan',''), 'item_summary': summary})
+            user_data[user_id].update({
+                'worksheet_to_edit': ws, 
+                'row_to_edit': row_num, 
+                'old_ket': row_data.get('Keterangan',''), 
+                'item_summary': build_summary_text(ws.title, row_data),
+                'ket_column_name': 'Keterangan' # Kolom yang akan diubah
+            })
             user_states[user_id].append("awaiting_new_ket")
             await q.message.reply_text(f"Keterangan sekarang: {row_data.get('Keterangan','(kosong)')}\nKirim keterangan baru:", reply_markup=NAVIGATION_KEYBOARD)
         
         elif device_type == "pc":
-            pc_detail_str = parts[1]
-            d, k1, k2, uk = pc_detail_str.split("::") 
+            d, k1, k2, uk = parts[1], parts[2], parts[3], parts[4]
             
             ws, row_num, row_data = find_patchcord_row(d,k1,k2,uk)
             if not row_num:
                 await q.message.reply_text("Item tidak ditemukan. Mohon coba lagi.", reply_markup=ReplyKeyboardRemove())
                 return await show_main_menu(q.message)
 
-            summary = build_summary_text(ws.title, row_data)
             user_data[user_id].update({
                 'worksheet_to_edit': ws, 
                 'row_to_edit': row_num, 
                 'old_ket': row_data.get('Keterangan',''),
-                'item_summary': summary
+                'item_summary': build_summary_text(ws.title, row_data),
+                'ket_column_name': 'Keterangan' # Kolom yang akan diubah
             })
             user_states[user_id].append("awaiting_new_ket")
             await q.message.reply_text(f"Keterangan sekarang: {row_data.get('Keterangan','(kosong)')}\nKirim keterangan baru:", reply_markup=NAVIGATION_KEYBOARD)
         
         elif device_type == "jaringan":
-            # Seharusnya tidak bisa sampai sini karena sudah difilter di handle_messages
-            await q.message.reply_text("Subcard tidak bisa diubah keterangannya.", reply_markup=ReplyKeyboardRemove())
-            return await show_main_menu(q.message)
+            row_num = int(parts[1])
+            ws = ss.worksheet("Subcard")
+            headers = ws.row_values(1)
+            row_data = dict(zip(headers, ws.row_values(row_num)))
+            
+            user_data[user_id].update({
+                'worksheet_to_edit': ws, 
+                'row_to_edit': row_num, 
+                'old_ket': row_data.get('Posisi',''), # Ambil data dari kolom Posisi
+                'item_summary': build_summary_text(ws.title, row_data),
+                'ket_column_name': 'Posisi' # Simpan nama kolom yang akan diubah
+            })
+            user_states[user_id].append("awaiting_new_ket")
+            await q.message.reply_text(f"Posisi sekarang: {row_data.get('Posisi','(kosong)')}\nKirim posisi baru:", reply_markup=NAVIGATION_KEYBOARD)
 
     if q.data.startswith("editqty_"):
         await q.message.delete()
@@ -1598,30 +1626,34 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
         device_type = parts[0].split("_")[1]
         
         if device_type == "pc":
-            pc_detail_str = parts[1]
-            d, k1, k2, uk = pc_detail_str.split("::") 
+            d, k1, k2, uk = parts[1], parts[2], parts[3], parts[4] 
             
             ws, row_num, row_data = find_patchcord_row(d,k1,k2,uk)
             if not row_num:
                 await q.message.reply_text("Item tidak ditemukan. Mungkin sudah dihapus.", reply_markup=ReplyKeyboardRemove())
                 await clear_user_session(user_id)
                 return await show_main_menu(q.message)
-        
-        elif device_type == "jaringan":
-            # Parse callback data: editqty_jaringan_detail::jns::kap::pos
-            if len(parts) < 4:
-                await q.message.reply_text("Format data tidak valid.", reply_markup=ReplyKeyboardRemove())
-                await clear_user_session(user_id)
-                return await show_main_menu(q.message)
             
+            user_data[user_id]['old_qty'] = str(row_data.get('Jumlah','0'))
+            user_data[user_id]['qty_column_name'] = 'Jumlah'
+            prompt_text = f"Jumlah unit sekarang: {row_data.get('Jumlah','0')}\nKirim jumlah baru (angka):"
+
+        elif device_type == "jaringan":
+            if len(parts) < 2: # Seharusnya jadi 4 jika ada data, tapi kita cek minimal
+                await q.message.reply_text("Format data tidak valid.", reply_markup=ReplyKeyboardRemove())
+                return await show_main_menu(q.message)
+
             jns, kap, pos = parts[1], parts[2], parts[3]
             
             ws, row_num, row_data = find_subcard_row(jns, kap, pos)
             if not row_num:
                 await q.message.reply_text("Item tidak ditemukan. Mungkin sudah dihapus.", reply_markup=ReplyKeyboardRemove())
-                await clear_user_session(user_id)
                 return await show_main_menu(q.message)
-        
+            
+            user_data[user_id]['old_qty'] = str(row_data.get('Jumlah Port','0'))
+            user_data[user_id]['qty_column_name'] = 'Jumlah Port'
+            prompt_text = f"Jumlah Port sekarang: {row_data.get('Jumlah Port','0')}\nKirim jumlah port baru (angka):"
+
         else:
             await q.message.reply_text("Tipe perangkat tidak dikenal untuk edit jumlah.", reply_markup=ReplyKeyboardRemove())
             return await show_main_menu(q.message)
@@ -1629,12 +1661,11 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
         user_data[user_id].update({
             'worksheet_to_edit': ws,
             'row_to_edit': row_num,
-            'old_qty': str(row_data.get('Jumlah','0')),
             'item_summary': build_summary_text(ws.title, row_data),
         })
         
         user_states[user_id].append("awaiting_new_jumlah")
-        await q.message.reply_text(f"Jumlah sekarang: {row_data.get('Jumlah','0')}\nKirim jumlah baru (angka):", reply_markup=NAVIGATION_KEYBOARD)
+        await q.message.reply_text(prompt_text, reply_markup=NAVIGATION_KEYBOARD)
         
     if q.data.startswith("consume_"):
         await q.message.delete()
@@ -1691,8 +1722,7 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
                 await q.message.reply_text("Masukkan keterangan pemakaian:", reply_markup=NAVIGATION_KEYBOARD)
         
         elif device_type == "pc":
-            pc_detail_str = parts[1]
-            d, k1, k2, uk = pc_detail_str.split("::") 
+            d, k1, k2, uk = parts[1], parts[2], parts[3], parts[4]
             
             ws, row_num, row_data = find_patchcord_row(d,k1,k2,uk)
             if not row_num:
