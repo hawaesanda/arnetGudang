@@ -86,7 +86,6 @@ DEVICE_CONFIG: Dict[str, Dict[str, Any]] = {
              "options": ["1G", "10G", "100G"]},
             {"key": "Posisi", "prompt": "Ketik Posisi Barang (e.g. STO Malang Kota)", "type": "text", "required": True},
             {"key": "Jumlah Port", "prompt": "Masukkan Jumlah Port", "type": "text", "required": True},
-            {"key": "Jumlah", "prompt": "Masukkan Jumlah unit (e.g. 1,2,3,...)", "type": "text", "required": True},
             {"key": "Link Foto", "prompt": "Kirim foto perangkat", "type": "photo"},
         ]
     },
