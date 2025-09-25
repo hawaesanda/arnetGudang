@@ -70,8 +70,8 @@ DEVICE_CONFIG: Dict[str, Dict[str, Any]] = {
             {"key": "Link Foto", "prompt": "Kirim foto perangkat", "type": "photo"},
         ]
     },
-    "Perangkat Jaringan": {
-        "worksheet_name": "Perangkat Jaringan",
+    "Subcard": {
+        "worksheet_name": "Subcard",
         "drive_folder_ids": {
             "Metro Tier 3":     "15xrOTyRowbPw0m3eMuoUEeau_abcwSsw",
             "Metro Tier 2 / 1": "12FSf7C6l8q0M1iYkO2zYUIfc1eA8W61_",
@@ -85,6 +85,7 @@ DEVICE_CONFIG: Dict[str, Dict[str, Any]] = {
             {"key": "Kapasitas", "prompt": "Pilih Kapasitas", "type": "buttons",
              "options": ["1G", "10G", "100G"]},
             {"key": "Posisi", "prompt": "Ketik Posisi Barang (e.g. STO Malang Kota)", "type": "text", "required": True},
+            {"key": "Jumlah Port", "prompt": "Masukkan Jumlah Port", "type": "text", "required": True},
             {"key": "Jumlah", "prompt": "Masukkan Jumlah unit (e.g. 1,2,3,...)", "type": "text", "required": True},
             {"key": "Link Foto", "prompt": "Kirim foto perangkat", "type": "photo"},
         ]
@@ -241,7 +242,6 @@ def upload_photo_to_drive(file_data: bytes, file_name: str, jenis_perangkat: str
     try:
         folder_ids = DEVICE_CONFIG.get(jenis_perangkat, {}).get("drive_folder_ids", {})
         target_folder_id = folder_ids.get(detail_perangkat, GOOGLE_DRIVE_PARENT_FOLDER_ID)
-        # Detect image type using mimetypes instead of deprecated imghdr
         kind = "jpeg"  # default
         if file_data.startswith(b'\x89PNG'):
             kind = "png"
@@ -316,23 +316,23 @@ def join_detail_sfp_no_ket(row: Dict[str, Any]) -> str:
 def join_detail_pc_no_ket(detail: str, k1: str, k2: str, ukuran: str) -> str:
     return f"{detail} | {k1} -> {k2} | {ukuran}"
 
-def _jaringan_row_match(r: Dict[str, Any], jenis: str, kapasitas: str, posisi: str) -> bool:
+def _subcard_row_match(r: Dict[str, Any], jenis: str, kapasitas: str, posisi: str) -> bool:
     if r.get("Jenis Perangkat") != jenis: return False
     if r.get("Kapasitas") != kapasitas: return False
     if r.get("Posisi") != posisi: return False
     return True
 
-def find_jaringan_row(jenis: str, kapasitas: str, posisi: str) -> Tuple[Optional[gspread.Worksheet], Optional[int], Optional[Dict[str, Any]]]:
+def find_subcard_row(jenis: str, kapasitas: str, posisi: str) -> Tuple[Optional[gspread.Worksheet], Optional[int], Optional[Dict[str, Any]]]:
     try:
-        ws = ss.worksheet("Perangkat Jaringan")
+        ws = ss.worksheet("Subcard")
         for i, r in enumerate(ws.get_all_records()):
-            if _jaringan_row_match(r, jenis, kapasitas, posisi):
+            if _subcard_row_match(r, jenis, kapasitas, posisi):
                 return ws, i + 2, r
     except gspread.exceptions.WorksheetNotFound:
         pass
     return None, None, None
 
-def join_detail_jaringan_no_ket(row: Dict[str, Any]) -> str:
+def join_detail_subcard_no_ket(row: Dict[str, Any]) -> str:
     jns = row.get("Jenis Perangkat","-")
     kap = row.get("Kapasitas","-")
     pos = row.get("Posisi","-")
@@ -351,16 +351,16 @@ def build_summary_text(ws_name: str, data: Dict[str, Any]) -> str:
         if ket: parts.append(f"Ket: {ket}")
         return " | ".join(parts)
     
-    elif ws_name == "Perangkat Jaringan":
+    elif ws_name == "Subcard":
         qty = str(data.get('Jumlah','')).strip()
-        ket = str(data.get('Keterangan', '')).strip() # Tetap ambil, meski kosong
+        ket = str(data.get('Keterangan', '')).strip()
         parts = [
             f"{data.get('Jenis Perangkat','-')}",
             f"Kapasitas: {data.get('Kapasitas','-')}",
             f"Posisi: {data.get('Posisi','-')}",
         ]
         if qty: parts.append(f"Jumlah: {qty}")
-        if ket: parts.append(f"Ket: {ket}") # Hanya akan tampil jika ada isinya
+        if ket: parts.append(f"Ket: {ket}")
         return " | ".join(parts)
     
     else: # Default untuk SFP
@@ -521,15 +521,36 @@ async def ask_next_question(message: Message):
 
 async def process_input_confirmation(message: Message):
     uid = message.from_user.id
-    data = user_data[uid]; device_type = data.get("device_type")
+    data = user_data[uid]
+    device_type = data.get("device_type")
+    
     lines = [f"Konfirmasi Data Masuk - {device_type}", ""]
-    for q in DEVICE_CONFIG[device_type]["questions"]:
-        key, value = q["key"], data.get(q["key"], "(kosong)")
-        if q["type"] == "photo": value = "(foto akan diunggah)"
-        lines.append(f"- {key}: {value}")
+    
+    if device_type == "Subcard":
+        for q in DEVICE_CONFIG[device_type]["questions"]:
+            key = q["key"]
+            value = data.get(key, "(kosong)")
+            
+            if key == "Jumlah":
+                jumlah_port = data.get("Jumlah Port", "?")
+                kapasitas = data.get("Kapasitas", "?")
+                lines.append(f"- Jumlah Port: {jumlah_port} x {kapasitas}")
+                lines.append(f"- Jumlah Unit: {value}")
+            elif key != "Jumlah Port":
+                if q["type"] == "photo":
+                    value = "(foto akan diunggah)"
+                lines.append(f"- {key}: {value}")
+    else:
+        for q in DEVICE_CONFIG[device_type]["questions"]:
+            key, value = q["key"], data.get(q["key"], "(kosong)")
+            if q["type"] == "photo":
+                value = "(foto akan diunggah)"
+            lines.append(f"- {key}: {value}")
+            
     lines += ["", "Apakah Anda yakin ingin menyimpan data ini?"]
     user_states[uid].append("awaiting_input_confirmation")
     await message.reply_text("\n".join(lines), reply_markup=CONFIRMATION_KEYBOARD)
+
 
 # =========================
 # COMMANDS
@@ -629,7 +650,7 @@ async def handle_messages(client: Client, message: Message):
             if not text.strip() and q.get("required"): return await message.reply_text("Input ini wajib diisi.")
             if dev == "Patch Cord" and q["key"] == "Jumlah" and not re.fullmatch(r"\d+", text.strip()):
                 return await message.reply_text("Jumlah harus angka. Contoh: 3")
-            if dev == "Perangkat Jaringan" and q["key"] == "Jumlah" and not re.fullmatch(r"\d+", text.strip()):
+            if dev == "Subcard" and q["key"] in ["Jumlah", "Jumlah Port"] and not re.fullmatch(r"\d+", text.strip()):
                 return await message.reply_text("Jumlah harus angka. Contoh: 10")
 
         user_data[user_id][q["key"]] = ans
@@ -657,12 +678,12 @@ async def handle_messages(client: Client, message: Message):
                 )
                 return
             
-        elif dev == "Perangkat Jaringan" and q["key"] == "Posisi":
+        elif dev == "Subcard" and q["key"] == "Posisi":
             jns = user_data[user_id].get("Jenis Perangkat")
             kap = user_data[user_id].get("Kapasitas")
             pos = ans # 'ans' adalah 'Posisi' yang baru dimasukkan
 
-            ws, row_num, row_data = find_jaringan_row(jns, kap, pos)
+            ws, row_num, row_data = find_subcard_row(jns, kap, pos)
 
             if row_num:
                 user_data[user_id].update({
@@ -737,7 +758,7 @@ async def handle_messages(client: Client, message: Message):
                     append_log("INSERT", ws.title, detail_no_ket, user_id, username, ket=(final_map.get("Keterangan") or ""))
                     await message.reply_text("Data baru berhasil disimpan.")
 
-                elif dev == "Perangkat Jaringan":
+                elif dev == "Subcard":
                     nomor_baru = next_no(ws)
                     final_row = [nomor_baru if h == "No" else final_map.get(h, "") for h in headers]
                     ws.append_row(final_row, value_input_option='USER_ENTERED')
@@ -749,7 +770,7 @@ async def handle_messages(client: Client, message: Message):
                     except Exception as e:
                         logger.error(f"Gagal mengurutkan/menomori ulang '{ws.title}': {e}")
                     
-                    detail_no_ket = join_detail_jaringan_no_ket(final_map) 
+                    detail_no_ket = join_detail_subcard_no_ket(final_map) 
                     append_log("INSERT", ws.title, detail_no_ket, user_id, username, ket=(final_map.get("Keterangan") or "")) # Keterangan akan kosong
                     await message.reply_text("Data baru berhasil disimpan.")
                 else:
@@ -802,8 +823,8 @@ async def handle_messages(client: Client, message: Message):
                 k2 = row_data.get("Konektor 2")
                 uk = row_data.get("Ukuran (PC)")
                 detail_no_ket = join_detail_pc_no_ket(d, k1, k2, uk)
-            elif ws.title == "Perangkat Jaringan":
-                detail_no_ket = join_detail_jaringan_no_ket(row_data)
+            elif ws.title == "Subcard":
+                detail_no_ket = join_detail_subcard_no_ket(row_data)
             else:
                 detail_no_ket = "N/A"
 
@@ -823,9 +844,9 @@ async def handle_messages(client: Client, message: Message):
             return await message.reply_text("Kirim SN SFP yang akan dihapus:", reply_markup=NAVIGATION_KEYBOARD)
         if text == "Patch Cord":
             user_states[user_id].append("awaiting_pc_detail_delete"); return await pc_prompt(message, "detail")
-        elif text == "Perangkat Jaringan":
+        elif text == "Subcard":
             user_states[user_id].append("awaiting_jaringan_jenis_delete")
-            opts = DEVICE_CONFIG["Perangkat Jaringan"]["questions"][0]["options"]
+            opts = DEVICE_CONFIG["Subcard"]["questions"][0]["options"]
             await message.reply_text("Pilih Jenis Perangkat:", reply_markup=get_dynamic_keyboard(opts))
             return
         return await message.reply_text("Jenis perangkat tidak valid.")
@@ -860,16 +881,16 @@ async def handle_messages(client: Client, message: Message):
         return await pc_find_and_prepare(message, "delete")
     
     if state == "awaiting_jaringan_jenis_delete":
-        opts = DEVICE_CONFIG["Perangkat Jaringan"]["questions"][0]["options"]
+        opts = DEVICE_CONFIG["Subcard"]["questions"][0]["options"]
         if invalid_choice(text, opts): return await reply_invalid_choice(message)
         user_data[user_id]["delete_jenis"] = text
         user_states[user_id].append("awaiting_jaringan_kap_delete")
-        opts = DEVICE_CONFIG["Perangkat Jaringan"]["questions"][1]["options"]
+        opts = DEVICE_CONFIG["Subcard"]["questions"][1]["options"]
         await message.reply_text("Pilih Kapasitas:", reply_markup=get_dynamic_keyboard(opts))
         return
         
     if state == "awaiting_jaringan_kap_delete":
-        opts = DEVICE_CONFIG["Perangkat Jaringan"]["questions"][1]["options"]
+        opts = DEVICE_CONFIG["Subcard"]["questions"][1]["options"]
         if invalid_choice(text, opts): return await reply_invalid_choice(message)
         user_data[user_id]["delete_kap"] = text
         user_states[user_id].append("awaiting_jaringan_pos_delete")
@@ -884,7 +905,7 @@ async def handle_messages(client: Client, message: Message):
         pos = user_data[user_id]["delete_pos"]
 
         await message.reply_text(f"Mencari: {jns} | {kap} | Posisi: {pos}...", reply_markup=ReplyKeyboardRemove())
-        ws, row_num, row_data = find_jaringan_row(jns, kap, pos)
+        ws, row_num, row_data = find_subcard_row(jns, kap, pos)
         
         if not row_num:
             await message.reply_text("Kombinasi tidak ditemukan.", reply_markup=NAVIGATION_KEYBOARD); return
@@ -917,8 +938,8 @@ async def handle_messages(client: Client, message: Message):
                                                           row_data.get('Konektor 1','-'),
                                                           row_data.get('Konektor 2','-'),
                                                           row_data.get('Ukuran (PC)','-'))
-                elif ws.title == "Perangkat Jaringan":
-                    detail_no_ket = join_detail_jaringan_no_ket(row_data)
+                elif ws.title == "Subcard":
+                    detail_no_ket = join_detail_subcard_no_ket(row_data)
                 else:
                     detail_no_ket = join_detail_sfp_no_ket(row_data)
 
@@ -935,8 +956,8 @@ async def handle_messages(client: Client, message: Message):
         if text == OPT_EDIT_KET:
             user_states[user_id].append("awaiting_device_to_edit")
             # --- DIMODIFIKASI ---
-            # Perangkat Jaringan tidak punya Keterangan, jadi jangan ditampilkan
-            device_options = [dev for dev in DEVICE_CONFIG.keys() if dev != "Perangkat Jaringan"]
+            # Subcard tidak punya Keterangan, jadi jangan ditampilkan
+            device_options = [dev for dev in DEVICE_CONFIG.keys() if dev != "Subcard"]
             return await message.reply_text("Pilih jenis perangkat yang akan diubah keterangannya:", reply_markup=get_dynamic_keyboard(device_options))
         
         if text == OPT_EDIT_QTY:
@@ -985,13 +1006,13 @@ async def handle_messages(client: Client, message: Message):
                 await message.reply_text("Gagal memuat data. Mohon coba lagi.", reply_markup=ReplyKeyboardRemove())
                 return await show_main_menu(message)
 
-        elif text == "Perangkat Jaringan":
+        elif text == "Subcard":
             user_states[user_id].append("awaiting_item_selection_for_edit_qty")
             try:
-                ws = ss.worksheet("Perangkat Jaringan")
+                ws = ss.worksheet("Subcard")
                 records = ws.get_all_records()
                 if not records:
-                    await message.reply_text("Tidak ada data Perangkat Jaringan untuk diubah.", reply_markup=ReplyKeyboardRemove())
+                    await message.reply_text("Tidak ada data Subcard untuk diubah.", reply_markup=ReplyKeyboardRemove())
                     return await show_main_menu(message)
                 buttons = []
                 grouped = defaultdict(int)
@@ -1009,8 +1030,8 @@ async def handle_messages(client: Client, message: Message):
                     if total_qty >= 0: 
                         callback_data = f"editqty_jaringan_detail::{'::'.join(key)}" 
                         row_data_mock = {"Jenis Perangkat": key[0], "Kapasitas": key[1], "Posisi": key[2]}
-                        buttons.append([InlineKeyboardButton(f"{join_detail_jaringan_no_ket(row_data_mock)} (Stok: {total_qty})", callback_data=callback_data)])
-                await message.reply_text("Pilih kombinasi Perangkat Jaringan yang ingin diubah jumlahnya:", reply_markup=NAVIGATION_KEYBOARD)
+                        buttons.append([InlineKeyboardButton(f"{join_detail_subcard_no_ket(row_data_mock)} (Stok: {total_qty})", callback_data=callback_data)])
+                await message.reply_text("Pilih kombinasi Subcard yang ingin diubah jumlahnya:", reply_markup=NAVIGATION_KEYBOARD)
                 await message.reply_text("Daftar item:", reply_markup=InlineKeyboardMarkup(buttons))
             except Exception:
                 logger.exception("Gagal memuat item Jaringan untuk ubah jumlah.")
@@ -1057,10 +1078,10 @@ async def handle_messages(client: Client, message: Message):
                         callback_data = f"editket_pc_detail::{'::'.join(key)}" 
                         buttons.append([InlineKeyboardButton(f"{join_detail_pc_no_ket(*key)} (Stok: {total_qty})", callback_data=callback_data)])
                 
-                elif text == "Perangkat Jaringan":
+                elif text == "Subcard":
                     # Blok ini seharusnya tidak akan pernah terjangkau karena sudah difilter
                     # Tapi kita biarkan sebagai failsafe
-                    await message.reply_text("Perangkat Jaringan tidak memiliki kolom Keterangan.", reply_markup=ReplyKeyboardRemove())
+                    await message.reply_text("Subcard tidak memiliki kolom Keterangan.", reply_markup=ReplyKeyboardRemove())
                     return await show_main_menu(message)
 
                 await message.reply_text(f"Pilih item yang ingin diubah keterangannya:", reply_markup=NAVIGATION_KEYBOARD)
@@ -1096,8 +1117,8 @@ async def handle_messages(client: Client, message: Message):
                 if ws.title == "Patch Cord":
                     detail_no_ket = join_detail_pc_no_ket(row_map.get('Detail Perangkat','-'), row_map.get('Konektor 1','-'),
                                                           row_map.get('Konektor 2','-'), row_map.get('Ukuran (PC)','-'))
-                elif ws.title == "Perangkat Jaringan":
-                    detail_no_ket = join_detail_jaringan_no_ket(row_map)
+                elif ws.title == "Subcard":
+                    detail_no_ket = join_detail_subcard_no_ket(row_map)
                 else:
                     detail_no_ket = join_detail_sfp_no_ket(row_map)
                 
@@ -1132,8 +1153,8 @@ async def handle_messages(client: Client, message: Message):
                 if ws.title == "Patch Cord":
                     detail_no_ket = join_detail_pc_no_ket(row_map.get('Detail Perangkat','-'), row_map.get('Konektor 1','-'),
                                                           row_map.get('Konektor 2','-'), row_map.get('Ukuran (PC)','-'))
-                elif ws.title == "Perangkat Jaringan":
-                    detail_no_ket = join_detail_jaringan_no_ket(row_map)
+                elif ws.title == "Subcard":
+                    detail_no_ket = join_detail_subcard_no_ket(row_map)
                 else:
                     detail_no_ket = join_detail_sfp_no_ket(row_map)
                 
@@ -1207,7 +1228,7 @@ async def handle_messages(client: Client, message: Message):
                                 callback_data = f"consume_pc_detail::{'::'.join(key)}" 
                                 buttons.append([InlineKeyboardButton(f"{join_detail_pc_no_ket(*key)} (Stok: {total_qty})", callback_data=callback_data)])
                     
-                    elif text == "Perangkat Jaringan":
+                    elif text == "Subcard":
                         grouped = defaultdict(int)
                         for rec in records:
                             key_tuple = (rec.get(k) for k in ["Jenis Perangkat", "Kapasitas", "Posisi"])
@@ -1219,7 +1240,7 @@ async def handle_messages(client: Client, message: Message):
                             if total_qty > 0:
                                 callback_data = f"consume_jaringan_detail::{'::'.join(key)}" 
                                 row_data_mock = {"Jenis Perangkat": key[0], "Kapasitas": key[1], "Posisi": key[2]}
-                                buttons.append([InlineKeyboardButton(f"{join_detail_jaringan_no_ket(row_data_mock)} (Stok: {total_qty})", callback_data=callback_data)])
+                                buttons.append([InlineKeyboardButton(f"{join_detail_subcard_no_ket(row_data_mock)} (Stok: {total_qty})", callback_data=callback_data)])
 
                     await message.reply_text(f"Pilih item yang ingin diambil:", reply_markup=NAVIGATION_KEYBOARD)
                     await message.reply_text("Daftar item:", reply_markup=InlineKeyboardMarkup(buttons))
@@ -1363,7 +1384,7 @@ async def handle_messages(client: Client, message: Message):
         data = user_data[user_id]
         
         jns, kap, pos = data['consume_jenis'], data['consume_kap'], data['consume_pos']
-        _, _, row_data = find_jaringan_row(jns, kap, pos)
+        _, _, row_data = find_subcard_row(jns, kap, pos)
         if not row_data: await message.reply_text("Item tidak ditemukan.", reply_markup=NAVIGATION_KEYBOARD); return
         try:
             stok_lama = int(str(row_data.get("Jumlah","0")).strip() or "0")
@@ -1381,13 +1402,13 @@ async def handle_messages(client: Client, message: Message):
         if not ket_pemakaian: return await message.reply_text("Keterangan pemakaian tidak boleh kosong.", reply_markup=NAVIGATION_KEYBOARD)
         data = user_data[user_id]
         qty = data["consume_qty"]
-        detail_no_ket = join_detail_jaringan_no_ket(data["consume_row_data"])
+        detail_no_ket = join_detail_subcard_no_ket(data["consume_row_data"])
         user_data[user_id]["consume_ket_pemakaian"] = ket_pemakaian
         user_data[user_id]["consume_detail_no_ket"] = detail_no_ket
         preview = f"{detail_no_ket} | Jumlah: {qty} | Ket: {ket_pemakaian}"
-        bullets = bullets_from_detail("Perangkat Jaringan", preview)
+        bullets = bullets_from_detail("Subcard", preview)
         user_states[user_id].append("awaiting_consume_confirm_jaringan")
-        return await message.reply_text(f"Konfirmasi Ambil - Perangkat Jaringan\n\n{bullets}\n\nLanjut ambil?", reply_markup=TAKE_CONFIRM_KEYBOARD)
+        return await message.reply_text(f"Konfirmasi Ambil - Subcard\n\n{bullets}\n\nLanjut ambil?", reply_markup=TAKE_CONFIRM_KEYBOARD)
 
     if state == "awaiting_consume_confirm_jaringan":
         if text == LABEL_CONFIRM_TAKE:
@@ -1402,7 +1423,7 @@ async def handle_messages(client: Client, message: Message):
             
             await message.reply_text("Memproses pengambilan...", reply_markup=ReplyKeyboardRemove())
             try:
-                _, row_num, row_data = find_jaringan_row(jns, kap, pos)
+                _, row_num, row_data = find_subcard_row(jns, kap, pos)
                 if not row_num:
                     await message.reply_text("Item tidak ditemukan. Mungkin sudah diambil oleh user lain.")
                     await clear_user_session(user_id)
@@ -1422,10 +1443,10 @@ async def handle_messages(client: Client, message: Message):
                 else:
                     ws.update_cell(row_num, qty_col, "0")
                 
-                append_pemakaian("Perangkat Jaringan", detail_no_ket, str(qty), ket_barang, ket_pemakaian, user_id, username)
+                append_pemakaian("Subcard", detail_no_ket, str(qty), ket_barang, ket_pemakaian, user_id, username)
                 await message.reply_text(f"Barang berhasil diambil dan dicatat di log pemakaian. Sisa stok: {stok_baru}", reply_markup=MAIN_MENU_KEYBOARD)
             except Exception:
-                logger.exception("Gagal proses ambil Perangkat Jaringan"); await message.reply_text("Gagal memproses pengambilan.")
+                logger.exception("Gagal proses ambil Subcard"); await message.reply_text("Gagal memproses pengambilan.")
             finally:
                 await clear_user_session(user_id)
             return await show_main_menu(message)
@@ -1567,7 +1588,7 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
         
         elif device_type == "jaringan":
             # Seharusnya tidak bisa sampai sini karena sudah difilter di handle_messages
-            await q.message.reply_text("Perangkat Jaringan tidak bisa diubah keterangannya.", reply_markup=ReplyKeyboardRemove())
+            await q.message.reply_text("Subcard tidak bisa diubah keterangannya.", reply_markup=ReplyKeyboardRemove())
             return await show_main_menu(q.message)
 
     if q.data.startswith("editqty_"):
@@ -1594,7 +1615,7 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
             
             jns, kap, pos = parts[1], parts[2], parts[3]
             
-            ws, row_num, row_data = find_jaringan_row(jns, kap, pos)
+            ws, row_num, row_data = find_subcard_row(jns, kap, pos)
             if not row_num:
                 await q.message.reply_text("Item tidak ditemukan. Mungkin sudah dihapus.", reply_markup=ReplyKeyboardRemove())
                 await clear_user_session(user_id)
@@ -1699,19 +1720,19 @@ async def handle_display_callback(client: Client, q: CallbackQuery):
             
             jns, kap, pos = parts[1], parts[2], parts[3]
             
-            ws, row_num, row_data = find_jaringan_row(jns, kap, pos)
+            ws, row_num, row_data = find_subcard_row(jns, kap, pos)
             if not row_num:
                 await q.message.reply_text("Kombinasi tidak ditemukan.", reply_markup=ReplyKeyboardRemove())
                 await clear_user_session(user_id)
                 return await show_main_menu(q.message)
 
             user_data[user_id].update({
-                "consume_ws_name": "Perangkat Jaringan",
+                "consume_ws_name": "Subcard",
                 "consume_jenis": jns,
                 "consume_kap": kap,
                 "consume_pos": pos,
                 "consume_row_data": row_data,
-                "consume_detail_no_ket": join_detail_jaringan_no_ket(row_data)
+                "consume_detail_no_ket": join_detail_subcard_no_ket(row_data)
             })
             user_states[user_id].append("awaiting_consume_jaringan_qty")
             await q.message.reply_text(f"Masukkan jumlah yang akan diambil (stok tersedia: {row_data.get('Jumlah','0')}):", reply_markup=NAVIGATION_KEYBOARD)
