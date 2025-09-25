@@ -938,7 +938,10 @@ async def handle_messages(client: Client, message: Message):
         
         if text == OPT_EDIT_QTY:
             user_states[user_id].append("awaiting_device_to_edit_qty")
-            qty_devices = [dev for dev, cfg in DEVICE_CONFIG.items() if "Jumlah" in [q['key'] for q in cfg['questions']]]
+            qty_devices = [
+                dev for dev, cfg in DEVICE_CONFIG.items() 
+                if any(q['key'] in ['Jumlah', 'Jumlah Port'] for q in cfg['questions'])
+            ]
             return await message.reply_text("Pilih jenis perangkat yang akan diubah jumlahnya:", reply_markup=get_dynamic_keyboard(qty_devices))
         
         elif text == BTN_BACK:
